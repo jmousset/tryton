@@ -24,6 +24,7 @@ from trytond.transaction import Transaction
 logger = logging.getLogger(__name__)
 
 ir_module = Table('ir_module')
+ir_module_feature = Table('ir_module_feature')
 ir_model_data = Table('ir_model_data')
 ir_configuration = Table('ir_configuration')
 
@@ -57,6 +58,31 @@ def _get_subdirs(module_config, with_test):
     return included_dirs
 
 
+def _declared_features(module_config):
+    if not module_config.has_section('features'):
+        return {}
+    return dict(module_config.items('features'))
+
+
+def get_module_features(name):
+    """Return the features a module declares, as {feature name: raw value}.
+
+    The value is opaque to trytond: it is carried to ir.module.feature and
+    interpreted by the application (coog reads it to decide what a feature
+    costs). A feature name is the name of one of the module's include_dirs;
+    everything registered from that directory is gated on it.
+    """
+    module_config, _ = parse_module_config(name)
+    if module_config is None:
+        return {}
+    return _declared_features(module_config)
+
+
+def feature_token(module, feature):
+    "The name a feature carries in the activated-modules set"
+    return '%s.%s' % (module, feature)
+
+
 def get_module_info(name, path=(), with_test=False):
     "Return the content of the tryton.cfg"
     module_config, directory = parse_module_config(name, path)
@@ -84,15 +110,19 @@ def get_module_info(name, path=(), with_test=False):
     return info
 
 
-def get_module_register(name, path=(), with_test=False):
+def get_module_register(name, path=(), with_test=False, features=()):
     "Return classes to register from tryton.cfg"
     from trytond.pool import Pool
     module_config, _ = parse_module_config(name, path)
     if module_config is None:
         return
+    declared = _declared_features(module_config) if not path else {}
     for section in module_config.sections():
         if section == 'register' or section.startswith('register '):
             depends = section[len('register'):].strip().split()
+            # Implicit gating: nothing inside a feature directory names the
+            # feature, the directory it comes from is what gates it.
+            depends.extend(features)
             for type_ in Pool.classes:
                 if not module_config.has_option(section, type_):
                     continue
@@ -108,8 +138,11 @@ def get_module_register(name, path=(), with_test=False):
                     }
     for directory in _get_subdirs(module_config, with_test):
         dir_path = directory.split("/")
+        sub_features = features
+        if directory in declared:
+            sub_features = (*features, feature_token(name, directory))
         yield from get_module_register(
-            name, (*path, *dir_path), with_test)
+            name, (*path, *dir_path), with_test, sub_features)
 
 
 def get_module_register_mixin(name, path=(), with_test=False):
@@ -260,6 +293,31 @@ def load_translations(pool, node, languages, prefix):
         Translation.translation_import(language, module, files)
 
 
+def backend_table_exist(name):
+    from trytond import backend
+    return backend.TableHandler.table_exist(name)
+
+
+def granted_features(cursor, update=False):
+    """Feature tokens to add to the set of activated modules.
+
+    Read from the database, never from a configuration file: classes are
+    replayed at every start while XML is replayed only on update, so a source
+    that can change without an update desynchronises the two.  'to activate' is
+    therefore seen only while updating, exactly as ir_module.state is.
+    """
+    # Not a try/except: on PostgreSQL a failed query aborts the transaction.
+    if not backend_table_exist('ir_module_feature'):
+        return set()  # database being created, or predating the table
+    states = ['activated']
+    if update:
+        states.append('to activate')
+    cursor.execute(*ir_module_feature.select(
+            ir_module_feature.name,
+            where=ir_module_feature.state.in_(states)))
+    return {name for name, in cursor}
+
+
 def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
     # Prevent to import backend when importing module
     from trytond.cache import Cache
@@ -302,6 +360,11 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
                     [[m, 'not activated'] for m in new_modules]))
 
         count = len(modules)
+
+        # Must stay after the ir_module insert above: a feature token entering
+        # new_modules would get an ir_module row, and migrate_modules exits on
+        # any ir_module row without a matching directory.
+        modules |= granted_features(cursor, update)
 
         def register_classes(classes, module, idx=0):
             logging_prefix = '%i%% (%i/%i):%s' % (
@@ -371,7 +434,12 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
                 tryton_parser = convert.TrytondXmlHandler(
                     pool, module, package_state, modules, lang)
 
+                module_features = get_module_features(module)
                 for filename in node.info.get('xml', []):
+                    head = filename.replace(os.sep, '/').split('/')[0]
+                    if (head in module_features
+                            and feature_token(module, head) not in modules):
+                        continue
                     filename = filename.replace('/', os.sep)
                     logger.info('%s:loading %s', logging_prefix, filename)
                     # Feed the parser with xml content:
@@ -471,6 +539,14 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
         while modules_todo:
             (module, to_delete) = modules_todo.pop()
             convert.post_import(pool, module, to_delete)
+
+        if update and backend_table_exist('ir_module_feature'):
+            cursor.execute(*ir_module_feature.update(
+                    [ir_module_feature.state], ['activated'],
+                    where=ir_module_feature.state == 'to activate'))
+            cursor.execute(*ir_module_feature.update(
+                    [ir_module_feature.state], ['not activated'],
+                    where=ir_module_feature.state == 'to remove'))
 
         if update:
             # Ensure cache is clear for other instances

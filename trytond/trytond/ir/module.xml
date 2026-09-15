@@ -42,6 +42,83 @@ this repository contains the full copyright notices and license terms. -->
             sequence="10"
             id="menu_module_form"/>
 
+        <record model="ir.ui.view" id="module_feature_view_form">
+            <field name="model">ir.module.feature</field>
+            <field name="type">form</field>
+            <field name="name">module_feature_form</field>
+        </record>
+        <record model="ir.ui.view" id="module_feature_view_tree">
+            <field name="model">ir.module.feature</field>
+            <field name="type">tree</field>
+            <field name="name">module_feature_list</field>
+        </record>
+        <record model="ir.action.act_window" id="act_module_feature_form">
+            <field name="name">Features</field>
+            <field name="type">ir.action.act_window</field>
+            <field name="res_model">ir.module.feature</field>
+        </record>
+        <record model="ir.action.act_window.view"
+            id="act_module_feature_form_view1">
+            <field name="sequence" eval="1"/>
+            <field name="view" ref="module_feature_view_tree"/>
+            <field name="act_window" ref="act_module_feature_form"/>
+        </record>
+        <record model="ir.action.act_window.view"
+            id="act_module_feature_form_view2">
+            <field name="sequence" eval="2"/>
+            <field name="view" ref="module_feature_view_form"/>
+            <field name="act_window" ref="act_module_feature_form"/>
+        </record>
+        <menuitem
+            parent="menu_modules"
+            action="act_module_feature_form"
+            sequence="15"
+            id="menu_module_feature_form"/>
+
+        <record model="ir.model.button" id="module_feature_activate_button">
+            <field name="model">ir.module.feature</field>
+            <field name="name">activate</field>
+            <field name="string">Activate</field>
+        </record>
+        <record model="ir.model.button-res.group"
+            id="module_feature_activate_button_group_admin">
+            <field name="button" ref="module_feature_activate_button"/>
+            <field name="group" ref="res.group_admin"/>
+        </record>
+
+        <record model="ir.model.button" id="module_feature_deactivate_button">
+            <field name="model">ir.module.feature</field>
+            <field name="name">deactivate</field>
+            <field name="string">Deactivate</field>
+        </record>
+        <record model="ir.model.button-res.group"
+            id="module_feature_deactivate_button_group_admin">
+            <field name="button" ref="module_feature_deactivate_button"/>
+            <field name="group" ref="res.group_admin"/>
+        </record>
+
+        <record model="ir.model.button" id="module_feature_cancel_button">
+            <field name="model">ir.module.feature</field>
+            <field name="name">cancel</field>
+            <field name="string">Cancel</field>
+        </record>
+        <record model="ir.model.button-res.group"
+            id="module_feature_cancel_button_group_admin">
+            <field name="button" ref="module_feature_cancel_button"/>
+            <field name="group" ref="res.group_admin"/>
+        </record>
+
+        <record model="ir.model.button" id="module_feature_apply_button">
+            <field name="model">ir.module.feature</field>
+            <field name="name">apply</field>
+            <field name="string">Apply</field>
+        </record>
+        <record model="ir.model.button-res.group"
+            id="module_feature_apply_button_group_admin">
+            <field name="button" ref="module_feature_apply_button"/>
+            <field name="group" ref="res.group_admin"/>
+        </record>
+
         <record model="ir.model.button" id="module_activate_button">
             <field name="model">ir.module</field>
             <field name="name">activate</field>
@@ -92,6 +169,21 @@ this repository contains the full copyright notices and license terms. -->
             <field name="group" ref="res.group_admin"/>
         </record>
 
+        <record model="ir.model.access" id="access_module_feature">
+            <field name="model">ir.module.feature</field>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_delete" eval="False"/>
+        </record>
+        <record model="ir.model.access" id="access_module_feature_admin">
+            <field name="model">ir.module.feature</field>
+            <field name="group" ref="res.group_admin"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_delete" eval="True"/>
+        </record>
         <record model="ir.model.access" id="access_module">
             <field name="model">ir.module</field>
             <field name="perm_read" eval="True"/>

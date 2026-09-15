@@ -9,7 +9,8 @@ from trytond.exceptions import UserError
 from trytond.i18n import gettext
 from trytond.model import ModelSQL, ModelView, Unique, fields, sequence_ordered
 from trytond.model.exceptions import AccessError
-from trytond.modules import get_module_info, get_modules
+from trytond.modules import (
+    feature_token, get_module_features, get_module_info, get_modules)
 from trytond.pool import Pool
 from trytond.pyson import Eval, If
 from trytond.rpc import RPC
@@ -38,6 +39,8 @@ class Module(ModelSQL, ModelView):
     version = fields.Function(fields.Char('Version'), 'get_version')
     dependencies = fields.One2Many('ir.module.dependency',
         'module', 'Dependencies', readonly=True)
+    features = fields.One2Many('ir.module.feature',
+        'module', "Features", readonly=True)
     parents = fields.Function(
         fields.Many2Many('ir.module', None, None, "Parents"),
         'get_parents')
@@ -271,6 +274,133 @@ class Module(ModelSQL, ModelView):
             Dependency.delete(to_delete)
         if to_save:
             Dependency.save(to_save)
+
+        cls._update_feature_list(name2module)
+
+    @classmethod
+    def _update_feature_list(cls, name2module):
+        Feature = Pool().get('ir.module.feature')
+        existing = {f.name: f for f in Feature.search([])}
+
+        declared = {}
+        for module in name2module.values():
+            for name, value in get_module_features(module.name).items():
+                declared[feature_token(module.name, name)] = (module, value)
+
+        to_delete = [
+            feature for token, feature in existing.items()
+            if token not in declared and feature.state != 'activated']
+        if to_delete:
+            Feature.delete(to_delete)
+            for feature in to_delete:
+                del existing[feature.name]
+
+        to_save = []
+        for token, (module, value) in declared.items():
+            feature = existing.get(token)
+            if feature is None:
+                to_save.append(Feature(
+                        name=token, module=module, value=value,
+                        state=Feature.default_state()))
+            elif feature.value != value:
+                feature.value = value
+                to_save.append(feature)
+        if to_save:
+            Feature.save(to_save)
+
+
+class ModuleFeature(ModelSQL, ModelView):
+    "Module Feature"
+    __name__ = "ir.module.feature"
+    name = fields.Char("Name", readonly=True, required=True)
+    module = fields.Many2One(
+        'ir.module', "Module", readonly=True, required=True,
+        ondelete='CASCADE')
+    value = fields.Char(
+        "Value", readonly=True,
+        help="Declared next to the feature name, and opaque to trytond: the "
+        "application decides what it means.")
+    state = fields.Selection([
+            ('not activated', "Not Activated"),
+            ('activated', "Activated"),
+            ('to activate', "To be activated"),
+            ('to remove', "To be removed"),
+            ], "State", readonly=True)
+
+    @classmethod
+    def __setup__(cls):
+        super().__setup__()
+        cls.__access__.add('module')
+        table = cls.__table__()
+        cls._sql_constraints = [
+            ('name_uniq', Unique(table, table.name),
+                'The name of the feature must be unique!'),
+            ]
+        cls._order.insert(0, ('name', 'ASC'))
+        cls._buttons.update({
+                'activate': {
+                    'invisible': Eval('state') != 'not activated',
+                    'depends': ['state'],
+                    },
+                'deactivate': {
+                    'invisible': Eval('state') != 'activated',
+                    'depends': ['state'],
+                    },
+                'cancel': {
+                    'invisible': ~Eval('state').in_(
+                        ['to activate', 'to remove']),
+                    'depends': ['state'],
+                    },
+                })
+
+    @staticmethod
+    def default_state():
+        return 'not activated'
+
+    @classmethod
+    @ModelView.button
+    @filter_state('not activated')
+    def activate(cls, features):
+        if features:
+            cls.write(features, {'state': 'to activate'})
+            cls._upgrade_modules(features)
+
+    @classmethod
+    @ModelView.button
+    @filter_state('activated')
+    def deactivate(cls, features):
+        if features:
+            cls.write(features, {'state': 'to remove'})
+            cls._upgrade_modules(features)
+
+    @classmethod
+    def _upgrade_modules(cls, features):
+        """Flag the host modules for upgrade.
+
+        Class registration is replayed at every start, but XML only while
+        updating, and ir.module.activate_upgrade does nothing at all when no
+        module is flagged. Toggling a feature would then be a silent no-op.
+        """
+        Module = Pool().get('ir.module')
+        modules = {
+            f.module for f in features if f.module.state == 'activated'}
+        if modules:
+            Module.write(list(modules), {'state': 'to upgrade'})
+
+    @classmethod
+    @ModelView.button
+    def cancel(cls, features):
+        for state, back_to in [
+                ('to activate', 'not activated'),
+                ('to remove', 'activated')]:
+            pending = [f for f in features if f.state == state]
+            if pending:
+                cls.write(pending, {'state': back_to})
+
+    @classmethod
+    @ModelView.button_action('ir.act_module_activate_upgrade')
+    def apply(cls, features):
+        pass
 
 
 class ModuleDependency(ModelSQL, ModelView):
