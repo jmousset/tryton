@@ -6,8 +6,6 @@ this repository contains the full copyright notices and license terms. -->
     <field name="name"/>
     <label name="module"/>
     <field name="module"/>
-    <label name="value"/>
-    <field name="value"/>
     <label name="state"/>
     <field name="state"/>
     <group col="-1" colspan="2" id="button">

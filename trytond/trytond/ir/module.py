@@ -284,8 +284,8 @@ class Module(ModelSQL, ModelView):
 
         declared = {}
         for module in name2module.values():
-            for name, value in get_module_features(module.name).items():
-                declared[feature_token(module.name, name)] = (module, value)
+            for name in get_module_features(module.name):
+                declared[feature_token(module.name, name)] = module
 
         to_delete = [
             feature for token, feature in existing.items()
@@ -295,16 +295,9 @@ class Module(ModelSQL, ModelView):
             for feature in to_delete:
                 del existing[feature.name]
 
-        to_save = []
-        for token, (module, value) in declared.items():
-            feature = existing.get(token)
-            if feature is None:
-                to_save.append(Feature(
-                        name=token, module=module, value=value,
-                        state=Feature.default_state()))
-            elif feature.value != value:
-                feature.value = value
-                to_save.append(feature)
+        to_save = [
+            Feature(name=token, module=module, state=Feature.default_state())
+            for token, module in declared.items() if token not in existing]
         if to_save:
             Feature.save(to_save)
 
@@ -316,10 +309,6 @@ class ModuleFeature(ModelSQL, ModelView):
     module = fields.Many2One(
         'ir.module', "Module", readonly=True, required=True,
         ondelete='CASCADE')
-    value = fields.Char(
-        "Value", readonly=True,
-        help="Declared next to the feature name, and opaque to trytond: the "
-        "application decides what it means.")
     state = fields.Selection([
             ('not activated', "Not Activated"),
             ('activated', "Activated"),
@@ -351,6 +340,7 @@ class ModuleFeature(ModelSQL, ModelView):
                         ['to activate', 'to remove']),
                     'depends': ['state'],
                     },
+                'apply': {},
                 })
 
     @staticmethod
