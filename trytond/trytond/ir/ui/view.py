@@ -290,7 +290,13 @@ class View(
         pool = Pool()
         value = None
         if self.name and self.module:
-            path = os.path.join(self.module, 'view', self.name + '.xml')
+            if '/' in self.name:
+                # A name carrying a path is relative to the module root, so a
+                # feature directory can hold its own views instead of leaving
+                # them behind in the module's shared view/ directory.
+                path = os.path.join(self.module, self.name + '.xml')
+            else:
+                path = os.path.join(self.module, 'view', self.name + '.xml')
             try:
                 with file_open(path,
                         subdir='modules', mode='r', encoding='utf-8') as fp:
